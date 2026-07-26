@@ -179,14 +179,83 @@ class FlashcardViewer(QMainWindow):
         self.preview_right_layout.addWidget(self.preview_right_label)
 
         # Center the card frame with its edit action buttons and previews
+        # -----------------------------
+        # LEFT PANEL
+        # -----------------------------
+        left_panel = QWidget()
+        left_panel.setFixedWidth(250)
+
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(15)
+
+        left_layout.addStretch()
+
+        left_layout.addWidget(
+            self.preview_left_frame,
+            alignment=Qt.AlignCenter
+        )
+
+        left_layout.addWidget(
+            self.remove_card_button,
+            alignment=Qt.AlignCenter
+        )
+
+        left_layout.addStretch()
+
+
+        # -----------------------------
+        # CENTER PANEL
+        # -----------------------------
+        center_panel = QWidget()
+        center_layout = QVBoxLayout(center_panel)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+
+        center_layout.addStretch()
+        center_layout.addWidget(
+            self.card_frame,
+            alignment=Qt.AlignCenter
+        )
+        center_layout.addStretch()
+
+
+        # -----------------------------
+        # RIGHT PANEL
+        # -----------------------------
+        right_panel = QWidget()
+        right_panel.setFixedWidth(250)
+
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(15)
+
+        right_layout.addStretch()
+
+        right_layout.addWidget(
+            self.preview_right_frame,
+            alignment=Qt.AlignCenter
+        )
+
+        right_layout.addWidget(
+            self.add_card_button,
+            alignment=Qt.AlignCenter
+        )
+
+        right_layout.addStretch()
+
+
+        # -----------------------------
+        # MAIN CONTAINER
+        # -----------------------------
         card_container = QHBoxLayout()
+        card_container.setContentsMargins(0, 0, 0, 0)
+        card_container.setSpacing(20)
+
         card_container.addStretch()
 
-        card_container.addWidget(self.preview_left_frame)
-        card_container.addLayout(self.left_action_column)
-        card_container.addWidget(self.card_frame)
-        card_container.addLayout(self.right_action_column)
-        card_container.addWidget(self.preview_right_frame)
+        card_container.addWidget(left_panel)
+        card_container.addWidget(center_panel, 1)
+        card_container.addWidget(right_panel)
 
         card_container.addStretch()
 
@@ -204,12 +273,6 @@ class FlashcardViewer(QMainWindow):
         self.prev_button.setMinimumWidth(120)
         self.prev_button.clicked.connect(self._previous_card)
         self.button_layout.addWidget(self.prev_button)
-        
-        self.flip_button = QPushButton("Flip Card")
-        self.flip_button.setFont(QFont("Arial", 10))
-        self.flip_button.setMinimumWidth(120)
-        self.flip_button.clicked.connect(self._flip_card)
-        self.button_layout.addWidget(self.flip_button)
         
         self.next_button = QPushButton("Next →")
         self.next_button.setFont(QFont("Arial", 10))
@@ -424,6 +487,8 @@ class FlashcardViewer(QMainWindow):
     
     def _next_card(self):
         """Move to the next card."""
+        if self.edit_mode and self.card_editor.isVisible():
+            self._commit_card_edit()
         if self.current_index < len(self.deck) - 1:
             self.current_index += 1
             self.showing_definition = self.card_flip_states.get(self.current_index, False)
@@ -431,6 +496,8 @@ class FlashcardViewer(QMainWindow):
     
     def _previous_card(self):
         """Move to the previous card."""
+        if self.edit_mode and self.card_editor.isVisible():
+            self._commit_card_edit()
         if self.current_index > 0:
             self.current_index -= 1
             self.showing_definition = self.card_flip_states.get(self.current_index, False)
@@ -469,7 +536,6 @@ class FlashcardViewer(QMainWindow):
                 self._sync_card_display_with_current_card()
             self.prev_button.setEnabled(False)
             self.next_button.setEnabled(False)
-            self.flip_button.setEnabled(False)
         else:
             if self.has_unsaved_changes:
                 self._show_exit_confirmation()
@@ -552,18 +618,52 @@ class FlashcardViewer(QMainWindow):
         if left_index >= 0:
             left_card = self.deck.get_flashcard(left_index)
             left_is_flipped = self.card_flip_states.get(left_index, False)
+            if left_is_flipped:
+                self.preview_left_frame.setStyleSheet(
+                    "background-color:#e8f4e8;"
+                    "border:1px solid #cccccc;"
+                    "border-radius:8px;"
+                )
+            else:
+                self.preview_left_frame.setStyleSheet(
+                    "background-color:white;"
+                    "border:1px solid #cccccc;"
+                    "border-radius:8px;"
+                )
             self.preview_left_label.setText(left_card.term if not left_is_flipped else left_card.definition)
-            self.preview_left_frame.setVisible(True)
+            # self.preview_left_frame.setVisible(True)
         else:
-            self.preview_left_frame.setVisible(False)
+            self.preview_left_label.setText("")
+            self.preview_left_frame.setStyleSheet("""
+                background-color: transparent;
+                border: none;
+            """)
+            # self.preview_left_frame.setVisible(False)
 
         if right_index < len(self.deck):
             right_card = self.deck.get_flashcard(right_index)
             right_is_flipped = self.card_flip_states.get(right_index, False)
+            if right_is_flipped:
+                self.preview_right_frame.setStyleSheet(
+                    "background-color:#e8f4e8;"
+                    "border:1px solid #cccccc;"
+                    "border-radius:8px;"
+                )
+            else:
+                self.preview_right_frame.setStyleSheet(
+                    "background-color:white;"
+                    "border:1px solid #cccccc;"
+                    "border-radius:8px;"
+                )
             self.preview_right_label.setText(right_card.term if not right_is_flipped else right_card.definition)
-            self.preview_right_frame.setVisible(True)
+            # self.preview_right_frame.setVisible(True)
         else:
-            self.preview_right_frame.setVisible(False)
+            self.preview_right_label.setText("")
+            self.preview_right_frame.setStyleSheet("""
+                background-color: transparent;
+                border: none;
+            """)
+            # self.preview_right_frame.setVisible(False)
 
     def _sync_card_display_with_current_card(self):
         """Ensure the main card UI reflects the current card contents."""
