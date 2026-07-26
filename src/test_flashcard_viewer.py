@@ -83,6 +83,42 @@ class FlashcardViewerTests(unittest.TestCase):
         self.assertEqual(deck.get_flashcard(0).term, "")
         self.assertEqual(deck.get_flashcard(0).definition, "")
 
+    def test_generated_cards_are_appended_to_current_deck(self):
+        deck = FlashcardDeck("Merge Test")
+        deck.add_flashcard("Existing", "Existing definition")
+
+        viewer = FlashcardViewer(deck)
+        viewer._merge_generated_cards_from_csv("Term,Definition\nNew term,New definition\n")
+
+        self.assertEqual(len(deck), 2)
+        self.assertEqual(deck.get_flashcard(0).term, "Existing")
+        self.assertEqual(deck.get_flashcard(1).term, "New term")
+        self.assertEqual(deck.get_flashcard(1).definition, "New definition")
+
+    def test_exit_without_saving_restores_pre_edit_state(self):
+        deck = FlashcardDeck("Undo Test")
+        deck.add_flashcard("Original", "Original definition")
+
+        viewer = FlashcardViewer(deck)
+        viewer._toggle_edit_mode()
+        viewer._begin_deck_title_edit()
+        viewer.deck_title_editor.setText("Changed Deck")
+        viewer._commit_deck_title_edit()
+        viewer._edit_current_card_content("Updated term")
+        viewer._add_new_card()
+
+        class DummyDialog:
+            def accept(self):
+                return None
+
+        viewer._exit_without_saving(DummyDialog())
+
+        self.assertEqual(deck.name, "Undo Test")
+        self.assertEqual(len(deck), 1)
+        self.assertEqual(deck.get_flashcard(0).term, "Original")
+        self.assertEqual(deck.get_flashcard(0).definition, "Original definition")
+        self.assertFalse(viewer.has_unsaved_changes)
+
 
 if __name__ == "__main__":
     unittest.main()
