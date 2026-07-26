@@ -2,12 +2,20 @@
 GUI Flashcard Viewer using PySide6.
 Allows users to view flashcards, flip them, and navigate with arrow keys or buttons.
 """
+import csv
+import io
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                 QHBoxLayout, QLabel, QPushButton, QFrame, QGraphicsOpacityEffect,
-                                QLineEdit, QTextEdit, QMessageBox, QDialog, QScrollArea)
+                                QLineEdit, QTextEdit, QMessageBox, QDialog, QScrollArea,
+                                QMenuBar, QMenu, QFileDialog)
 from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QPoint
-from PySide6.QtGui import QFont, QKeySequence
-from flashcard import FlashcardDeck
+from PySide6.QtGui import QFont, QKeySequence, QAction
+from flashcard import Flashcard, FlashcardDeck
 
 
 class FlashcardViewer(QMainWindow):
@@ -21,6 +29,7 @@ class FlashcardViewer(QMainWindow):
         self.edit_mode = False
         self.has_unsaved_changes = False
         self.csv_path = getattr(deck, "csv_path", None)  # Path to CSV file for saving
+        self._initialize_deck_if_needed()
         
         # Create main window
         super().__init__()
@@ -64,6 +73,8 @@ class FlashcardViewer(QMainWindow):
         
         self.main_layout.addLayout(header_layout)
         
+        self._create_menu_bar()
+        
         # Add stretch to push card to center
         self.main_layout.addStretch()
         
@@ -84,6 +95,13 @@ class FlashcardViewer(QMainWindow):
         self.card_text.setFont(QFont("Arial", 24))
         self.card_text.setWordWrap(True)
         self.card_layout.addWidget(self.card_text)
+
+        self.card_editor = QLineEdit("")
+        self.card_editor.setAlignment(Qt.AlignCenter)
+        self.card_editor.setFont(QFont("Arial", 24))
+        self.card_editor.setVisible(False)
+        self.card_editor.returnPressed.connect(self._commit_card_edit)
+        self.card_layout.addWidget(self.card_editor)
         
         self.hint_label = QLabel("Click or press Space/Enter to flip")
         self.hint_label.setAlignment(Qt.AlignCenter)
@@ -138,116 +156,83 @@ class FlashcardViewer(QMainWindow):
         self.counter_label.setFont(QFont("Arial", 10))
         self.main_layout.addWidget(self.counter_label)
         
-        # Edit mode panel (hidden by default)
-        self.edit_panel = QWidget()
-        self.edit_layout = QVBoxLayout(self.edit_panel)
-        self.edit_panel.setVisible(False)
-        self.main_layout.addWidget(self.edit_panel)
+        # Edit mode controls row (hidden until edit mode)
+        self.edit_controls = QWidget()
+        self.edit_controls_layout = QHBoxLayout(self.edit_controls)
+        self.edit_controls_layout.setSpacing(10)
+        self.edit_controls.setVisible(False)
+        self.main_layout.addWidget(self.edit_controls)
+
+        self.deck_name_label = QLabel("Deck Name:")
+        self.deck_name_label.setFont(QFont("Arial", 10))
+        self.edit_controls_layout.addWidget(self.deck_name_label)
+
+        self.deck_name_editor = QLineEdit(self.deck.name)
+        self.deck_name_editor.setPlaceholderText("Deck name")
+        self.deck_name_editor.setMaximumWidth(220)
+        self.deck_name_editor.textChanged.connect(self._on_deck_name_changed)
+        self.edit_controls_layout.addWidget(self.deck_name_editor)
         
-        # Build edit mode UI
-        self._build_edit_ui()
-    
-    def _build_edit_ui(self):
-        """Build the edit mode UI components."""
-        # Edit mode title
-        edit_title = QLabel("Edit Mode")
-        edit_title.setAlignment(Qt.AlignCenter)
-        edit_title.setFont(QFont("Arial", 16, QFont.Bold))
-        self.edit_layout.addWidget(edit_title)
-        
-        # Current card editing section
-        current_card_frame = QFrame()
-        current_card_frame.setFrameStyle(QFrame.Box | QFrame.Raised)
-        current_card_layout = QVBoxLayout(current_card_frame)
-        
-        current_card_label = QLabel("Edit Current Card:")
-        current_card_label.setFont(QFont("Arial", 12, QFont.Bold))
-        current_card_layout.addWidget(current_card_label)
-        
-        # Term field
-        term_label = QLabel("Term:")
-        term_label.setFont(QFont("Arial", 10))
-        current_card_layout.addWidget(term_label)
-        
-        self.term_edit = QLineEdit()
-        self.term_edit.setFont(QFont("Arial", 12))
-        current_card_layout.addWidget(self.term_edit)
-        
-        # Definition field
-        def_label = QLabel("Definition:")
-        def_label.setFont(QFont("Arial", 10))
-        current_card_layout.addWidget(def_label)
-        
-        self.def_edit = QTextEdit()
-        self.def_edit.setFont(QFont("Arial", 12))
-        self.def_edit.setMaximumHeight(100)
-        current_card_layout.addWidget(self.def_edit)
-        
-        # Update button
-        self.update_card_button = QPushButton("Update Current Card")
-        self.update_card_button.clicked.connect(self._update_current_card)
-        current_card_layout.addWidget(self.update_card_button)
-        
-        # Delete button
-        self.delete_card_button = QPushButton("Delete Current Card")
-        self.delete_card_button.clicked.connect(self._delete_current_card)
-        current_card_layout.addWidget(self.delete_card_button)
-        
-        self.edit_layout.addWidget(current_card_frame)
-        
-        # Add new card section
-        add_card_frame = QFrame()
-        add_card_frame.setFrameStyle(QFrame.Box | QFrame.Raised)
-        add_card_layout = QVBoxLayout(add_card_frame)
-        
-        add_card_label = QLabel("Add New Card:")
-        add_card_label.setFont(QFont("Arial", 12, QFont.Bold))
-        add_card_layout.addWidget(add_card_label)
-        
-        # New term field
-        new_term_label = QLabel("New Term:")
-        new_term_label.setFont(QFont("Arial", 10))
-        add_card_layout.addWidget(new_term_label)
-        
-        self.new_term_edit = QLineEdit()
-        self.new_term_edit.setFont(QFont("Arial", 12))
-        add_card_layout.addWidget(self.new_term_edit)
-        
-        # New definition field
-        new_def_label = QLabel("New Definition:")
-        new_def_label.setFont(QFont("Arial", 10))
-        add_card_layout.addWidget(new_def_label)
-        
-        self.new_def_edit = QTextEdit()
-        self.new_def_edit.setFont(QFont("Arial", 12))
-        self.new_def_edit.setMaximumHeight(100)
-        add_card_layout.addWidget(self.new_def_edit)
-        
-        # Add button
-        self.add_card_button = QPushButton("Add New Card")
+        self.add_card_button = QPushButton("Add Blank Card")
         self.add_card_button.clicked.connect(self._add_new_card)
-        add_card_layout.addWidget(self.add_card_button)
+        self.edit_controls_layout.addWidget(self.add_card_button)
         
-        self.edit_layout.addWidget(add_card_frame)
+        self.remove_card_button = QPushButton("Remove Current Card")
+        self.remove_card_button.clicked.connect(self._remove_current_card)
+        self.edit_controls_layout.addWidget(self.remove_card_button)
         
-        # Save button
+        self.make_flashcards_button = QPushButton("Make Flashcards from Image(s)")
+        self.make_flashcards_button.clicked.connect(self._make_flashcards_from_images)
+        self.edit_controls_layout.addWidget(self.make_flashcards_button)
+
         self.save_button = QPushButton("Save Changes (Ctrl+S)")
         self.save_button.setFont(QFont("Arial", 12, QFont.Bold))
         self.save_button.clicked.connect(self._save_changes)
-        self.edit_layout.addWidget(self.save_button)
-    
+        self.edit_controls_layout.addWidget(self.save_button)
+
+    def _create_menu_bar(self):
+        """Create the main application menu bar."""
+        menu_bar = self.menuBar()
+        file_menu = menu_bar.addMenu("&File")
+
+        import_action = QAction("&Import CSV...", self)
+        import_action.setShortcut("Ctrl+Shift+S")
+        import_action.triggered.connect(self._import_csv_from_dialog)
+        file_menu.addAction(import_action)
+
+    def _initialize_deck_if_needed(self):
+        """Start with a single blank card when no deck or CSV is present."""
+        if len(self.deck) == 0 and not getattr(self.deck, "csv_path", None):
+            self.deck.add_flashcard("", "")
+            self.current_index = 0
+            self.showing_definition = False
+
+    def _on_deck_name_changed(self, text: str):
+        """Keep the deck title in sync with the editable name field."""
+        self.deck.name = text.strip() or "Untitled"
+        self.deck_label.setText(self.deck.name)
+        self.setWindowTitle(f"Flashcard Viewer - {self.deck.name}")
+        self.has_unsaved_changes = True
+
     def _card_clicked(self, event):
-        """Handle card click to flip."""
+        """Handle card click to edit the card directly in edit mode or flip it otherwise."""
+        if self.edit_mode:
+            self._edit_current_card_content()
+            return
         self._flip_card()
     
     def _update_display(self):
         """Update the display with current card information."""
         if len(self.deck) == 0:
+            self.card_text.setVisible(True)
+            self.card_editor.setVisible(False)
             self.card_text.setText("No cards in deck")
             self.counter_label.setText("0 / 0")
             return
         
         card = self.deck.get_flashcard(self.current_index)
+        self.card_text.setVisible(True)
+        self.card_editor.setVisible(False)
         
         if self.showing_definition:
             self.card_text.setText(card.definition)
@@ -276,48 +261,28 @@ class FlashcardViewer(QMainWindow):
         
         self.is_animating = True
         
-        # Create opacity effect for fade animation
         opacity_effect = QGraphicsOpacityEffect(self.card_frame)
         self.card_frame.setGraphicsEffect(opacity_effect)
         
-        # Fade out animation
         self.fade_animation = QPropertyAnimation(opacity_effect, b"opacity")
         self.fade_animation.setDuration(150)
         self.fade_animation.setStartValue(1.0)
         self.fade_animation.setEndValue(0.0)
         self.fade_animation.setEasingCurve(QEasingCurve.InOutQuad)
         
-        # Fade in animation
         self.fade_in_animation = QPropertyAnimation(opacity_effect, b"opacity")
         self.fade_in_animation.setDuration(150)
         self.fade_in_animation.setStartValue(0.0)
         self.fade_in_animation.setEndValue(1.0)
         self.fade_in_animation.setEasingCurve(QEasingCurve.InOutQuad)
         
-        # Connect fade out completion to content change and fade in
         self.fade_animation.finished.connect(lambda: self._on_fade_out_complete(opacity_effect))
-        
         self.fade_animation.start()
     
     def _on_fade_out_complete(self, opacity_effect):
         """Handle fade out completion - change content and fade in."""
-        # Toggle the content
         self.showing_definition = not self.showing_definition
-        
-        # Update the display content
-        card = self.deck.get_flashcard(self.current_index)
-        if self.showing_definition:
-            self.card_text.setText(card.definition)
-            self.card_frame.setStyleSheet("background-color: #e8f4e8;")
-            self.card_text.setStyleSheet("background-color: #e8f4e8;")
-            self.hint_label.setStyleSheet("color: gray; background-color: #e8f4e8;")
-        else:
-            self.card_text.setText(card.term)
-            self.card_frame.setStyleSheet("background-color: white;")
-            self.card_text.setStyleSheet("background-color: white;")
-            self.hint_label.setStyleSheet("color: gray; background-color: white;")
-        
-        # Start fade in
+        self._refresh_card_view()
         self.fade_in_animation.finished.connect(lambda: self._on_animation_complete(opacity_effect))
         self.fade_in_animation.start()
     
@@ -325,6 +290,44 @@ class FlashcardViewer(QMainWindow):
         """Handle animation completion - cleanup."""
         self.card_frame.setGraphicsEffect(None)
         self.is_animating = False
+    
+    def _refresh_card_view(self):
+        """Refresh the card face or editor based on the current mode."""
+        if len(self.deck) == 0:
+            self.card_text.setVisible(True)
+            self.card_editor.setVisible(False)
+            self.card_text.setText("No cards in deck")
+            self.counter_label.setText("0 / 0")
+            return
+
+        card = self.deck.get_flashcard(self.current_index)
+        if self.card_editor.isVisible():
+            current_value = card.definition if self.showing_definition else card.term
+            self.card_editor.setText(current_value)
+            self.card_text.setVisible(False)
+            self.card_editor.setVisible(True)
+            self.card_editor.setFocus()
+            self.card_frame.setStyleSheet("background-color: white;")
+            self.card_text.setStyleSheet("background-color: white;")
+            self.hint_label.setStyleSheet("color: gray; background-color: white;")
+        else:
+            self.card_text.setVisible(True)
+            self.card_editor.setVisible(False)
+            if self.showing_definition:
+                self.card_text.setText(card.definition)
+                self.card_frame.setStyleSheet("background-color: #e8f4e8;")
+                self.card_text.setStyleSheet("background-color: #e8f4e8;")
+                self.hint_label.setStyleSheet("color: gray; background-color: #e8f4e8;")
+            else:
+                self.card_text.setText(card.term)
+                self.card_frame.setStyleSheet("background-color: white;")
+                self.card_text.setStyleSheet("background-color: white;")
+                self.hint_label.setStyleSheet("color: gray; background-color: white;")
+
+        self.counter_label.setText(f"Card {self.current_index + 1} / {len(self.deck)}")
+        self.prev_button.setEnabled(self.current_index > 0)
+        self.next_button.setEnabled(self.current_index < len(self.deck) - 1)
+        self.setFocus()
     
     def _next_card(self):
         """Move to the next card."""
@@ -347,7 +350,10 @@ class FlashcardViewer(QMainWindow):
         elif event.key() == Qt.Key_Right:
             self._next_card()
         elif event.key() == Qt.Key_Space or event.key() == Qt.Key_Return:
-            self._flip_card()
+            if self.edit_mode and self.card_editor.isVisible():
+                self._commit_card_edit()
+            else:
+                self._flip_card()
         elif event.key() == Qt.Key_S and (event.modifiers() & Qt.ControlModifier):
             self._save_changes()
         else:
@@ -356,23 +362,15 @@ class FlashcardViewer(QMainWindow):
     def _toggle_edit_mode(self):
         """Toggle between edit mode and view mode."""
         if not self.edit_mode:
-            # Enter edit mode
             self.edit_mode = True
             self.edit_mode_button.setText("Exit Edit Mode")
-            self.edit_panel.setVisible(True)
-            
-            # Load current card data into edit fields
+            self.edit_controls.setVisible(True)
             if len(self.deck) > 0:
-                card = self.deck.get_flashcard(self.current_index)
-                self.term_edit.setText(card.term)
-                self.def_edit.setPlainText(card.definition)
-            
-            # Disable navigation buttons in edit mode
+                self._sync_card_display_with_current_card()
             self.prev_button.setEnabled(False)
             self.next_button.setEnabled(False)
             self.flip_button.setEnabled(False)
         else:
-            # Exit edit mode - check for unsaved changes
             if self.has_unsaved_changes:
                 self._show_exit_confirmation()
             else:
@@ -382,17 +380,11 @@ class FlashcardViewer(QMainWindow):
         """Exit edit mode without saving."""
         self.edit_mode = False
         self.edit_mode_button.setText("Edit Mode")
-        self.edit_panel.setVisible(False)
+        self.edit_controls.setVisible(False)
         self.has_unsaved_changes = False
-        
-        # Re-enable navigation buttons
+        self.card_editor.setVisible(False)
+        self.card_text.setVisible(True)
         self._update_display()
-        
-        # Clear edit fields
-        self.term_edit.clear()
-        self.def_edit.clear()
-        self.new_term_edit.clear()
-        self.new_def_edit.clear()
     
     def _show_exit_confirmation(self):
         """Show confirmation dialog for exiting edit mode with unsaved changes."""
@@ -435,140 +427,272 @@ class FlashcardViewer(QMainWindow):
         dialog.accept()
         self._exit_edit_mode()
     
-    def _update_current_card(self):
-        """Update the current card with new term and definition."""
+    def _sync_card_display_with_current_card(self):
+        """Ensure the main card UI reflects the current card contents."""
         if len(self.deck) == 0:
-            QMessageBox.warning(self, "No Cards", "No cards in deck to update.")
+            self.card_text.setVisible(True)
+            self.card_editor.setVisible(False)
+            self.card_text.setText("No cards in deck")
+            self.counter_label.setText("0 / 0")
             return
-        
-        new_term = self.term_edit.text().strip()
-        new_def = self.def_edit.toPlainText().strip()
-        
-        if not new_term or not new_def:
-            QMessageBox.warning(self, "Empty Fields", "Term and definition cannot be empty.")
+
+        card = self.deck.get_flashcard(self.current_index)
+        self.showing_definition = False
+        self.card_text.setVisible(True)
+        self.card_editor.setVisible(False)
+        self.card_text.setText(card.term)
+        self.card_frame.setStyleSheet("background-color: white;")
+        self.card_text.setStyleSheet("background-color: white;")
+        self.hint_label.setStyleSheet("color: gray; background-color: white;")
+        self.counter_label.setText(f"Card {self.current_index + 1} / {len(self.deck)}")
+
+    def _begin_card_edit(self):
+        """Open the inline editor for the current card side."""
+        if len(self.deck) == 0 or not self.edit_mode:
             return
-        
-        # Update the card
-        self.deck.flashcards[self.current_index].term = new_term
-        self.deck.flashcards[self.current_index].definition = new_def
-        
+
+        card = self.deck.get_flashcard(self.current_index)
+        self.card_editor.setText(card.definition if self.showing_definition else card.term)
+        self.card_text.setVisible(False)
+        self.card_editor.setVisible(True)
+        self.card_editor.selectAll()
+        self.card_editor.setFocus()
+
+    def _commit_card_edit(self):
+        """Commit the inline editor contents to the current card."""
+        if len(self.deck) == 0 or not self.edit_mode:
+            return
+
+        card = self.deck.get_flashcard(self.current_index)
+        value = self.card_editor.text().strip()
+        if self.showing_definition:
+            card.definition = value
+        else:
+            card.term = value
+
         self.has_unsaved_changes = True
-        self._update_display()
-        QMessageBox.information(self, "Success", "Card updated successfully!")
-    
-    def _delete_current_card(self):
-        """Delete the current card from the deck."""
+        self.card_editor.setVisible(False)
+        self.card_text.setVisible(True)
+        self._refresh_card_view()
+
+    def _edit_current_card_content(self, value=None):
+        """Toggle inline editing for the current card or apply a provided value."""
         if len(self.deck) == 0:
-            QMessageBox.warning(self, "No Cards", "No cards in deck to delete.")
             return
-        
-        # Confirm deletion
+
+        if not self.edit_mode:
+            return
+
+        if value is not None:
+            self.card_editor.setText(value)
+            self._commit_card_edit()
+            return
+
+        if self.card_editor.isVisible():
+            self._commit_card_edit()
+        else:
+            self._begin_card_edit()
+
+    def _import_csv_from_dialog(self):
+        """Import a CSV file into the current deck from a file dialog."""
+        file_path, _ = QFileDialog.getOpenFileName(self, "Import CSV", "", "CSV Files (*.csv)")
+        if not file_path:
+            return
+        self._import_csv_file(file_path)
+
+    def _import_csv_file(self, file_path: str):
+        """Import a CSV file and replace the current deck contents."""
+        try:
+            imported_deck = FlashcardDeck.from_csv(file_path, name=Path(file_path).stem)
+            self.deck.flashcards = list(imported_deck.flashcards)
+            self.deck.name = imported_deck.name
+            self.deck.csv_path = imported_deck.csv_path
+            self.csv_path = imported_deck.csv_path
+            self.current_index = 0
+            self.showing_definition = False
+            self.has_unsaved_changes = False
+            if len(self.deck) == 0:
+                self.deck.add_flashcard("", "")
+                self.current_index = 0
+            self.setWindowTitle(f"Flashcard Viewer - {self.deck.name}")
+            self._update_display()
+            QMessageBox.information(self, "CSV Imported", f"Imported {len(self.deck)} flashcards from {file_path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Import Error", f"Failed to import CSV: {exc}")
+
+    def _make_flashcards_from_images(self):
+        """Generate flashcards from selected images using an Ollama vision model."""
+        image_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select Images",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)",
+        )
+        if not image_paths:
+            return
+
+        prompt = (
+            "Analyze the provided images and create a flashcard CSV. "
+            "Return only CSV with the header Term,Definition and one row per flashcard. "
+            "Do not include markdown fences or commentary."
+        )
+
+        try:
+            command = ["ollama", "run", "qwen2.5-vl", prompt]
+            for image_path in image_paths:
+                command.extend(["--image", image_path])
+
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=600)
+            if completed.returncode != 0:
+                raise RuntimeError(completed.stderr.strip() or completed.stdout.strip() or "Ollama failed")
+
+            generated_csv = self._extract_csv_from_ollama_output(completed.stdout)
+            if not generated_csv:
+                raise RuntimeError("Ollama did not return parseable CSV data")
+
+            with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8") as handle:
+                handle.write(generated_csv)
+                temp_path = handle.name
+
+            self._import_csv_file(temp_path)
+            os.remove(temp_path)
+            QMessageBox.information(self, "Flashcards Generated", "Flashcards were generated and loaded successfully.")
+        except FileNotFoundError:
+            QMessageBox.critical(self, "Ollama Not Available", "The 'ollama' command was not found. Install Ollama and the qwen2.5-vl model to use this feature.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Generation Error", f"Failed to generate flashcards: {exc}")
+
+    def _extract_csv_from_ollama_output(self, output: str) -> str:
+        """Extract CSV content from Ollama's text output."""
+        cleaned = output.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`")
+            if cleaned.startswith("csv"):
+                cleaned = cleaned[3:].strip()
+        lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+        if not lines:
+            return ""
+
+        start_index = None
+        for index, line in enumerate(lines):
+            if line.lower().startswith("term,definition"):
+                start_index = index
+                break
+
+        if start_index is None:
+            return ""
+
+        csv_text = "\n".join(lines[start_index:])
+        try:
+            rows = list(csv.reader(io.StringIO(csv_text)))
+        except csv.Error:
+            return ""
+
+        if not rows:
+            return ""
+
+        normalized_rows = []
+        for row in rows:
+            if not row:
+                continue
+            if len(row) >= 2:
+                term = row[0].strip()
+                definition = row[1].strip()
+            else:
+                term = row[0].strip()
+                definition = ""
+            if term or definition:
+                normalized_rows.append([term, definition])
+
+        if not normalized_rows:
+            return ""
+
+        output_lines = ["Term,Definition"]
+        output_lines.extend([f"{term},{definition}" for term, definition in normalized_rows])
+        return "\n".join(output_lines)
+
+    def _remove_current_card(self):
+        """Remove the current card from the deck while in edit mode."""
+        if len(self.deck) == 0:
+            QMessageBox.warning(self, "No Cards", "No cards in deck to remove.")
+            return
+
         reply = QMessageBox.question(
             self, "Confirm Delete",
-            f"Are you sure you want to delete this card?\n\nTerm: {self.deck.flashcards[self.current_index].term}",
+            f"Are you sure you want to remove this card?\n\nTerm: {self.deck.flashcards[self.current_index].term}",
             QMessageBox.Yes | QMessageBox.No
         )
-        
+
         if reply == QMessageBox.Yes:
             del self.deck.flashcards[self.current_index]
             self.has_unsaved_changes = True
-            
-            # Adjust index if needed
+
             if self.current_index >= len(self.deck):
                 self.current_index = max(0, len(self.deck) - 1)
-            
-            self._update_display()
-            
-            # Update edit fields if there are still cards
-            if len(self.deck) > 0:
-                card = self.deck.get_flashcard(self.current_index)
-                self.term_edit.setText(card.term)
-                self.def_edit.setText(card.definition)
+
+            if len(self.deck) == 0:
+                self.card_text.setText("No cards in deck")
+                self.counter_label.setText("0 / 0")
             else:
-                self.term_edit.clear()
-                self.def_edit.clear()
-            
-            QMessageBox.information(self, "Success", "Card deleted successfully!")
+                self._update_display()
+
+            QMessageBox.information(self, "Success", "Card removed successfully!")
     
     def _add_new_card(self):
-        """Add a new card to the deck."""
-        new_term = self.new_term_edit.text().strip()
-        new_def = self.new_def_edit.toPlainText().strip()
-        
-        if not new_term or not new_def:
-            QMessageBox.warning(self, "Empty Fields", "Term and definition cannot be empty.")
-            return
-        
-        # Add the new card
-        self.deck.add_flashcard(new_term, new_def)
+        """Add a blank card after the current card and switch to it."""
+        if len(self.deck) == 0:
+            self.deck.add_flashcard("", "")
+            self.current_index = 0
+        else:
+            self.deck.flashcards.insert(self.current_index + 1, Flashcard("", ""))
+            self.current_index += 1
+
         self.has_unsaved_changes = True
-        
-        # Clear the new card fields
-        self.new_term_edit.clear()
-        self.new_def_edit.clear()
-        
-        # Update display
+        self.showing_definition = False
         self._update_display()
-        QMessageBox.information(self, "Success", "New card added successfully!")
+        if self.edit_mode:
+            self._begin_card_edit()
+        QMessageBox.information(self, "Success", "Blank card added successfully!")
     
     def _save_changes(self):
         """Save changes to the CSV file."""
-        if len(self.deck) > 0 and self.edit_mode:
-            self._commit_current_card_edits()
+        if self.edit_mode and self.card_editor.isVisible():
+            self._commit_card_edit()
 
         if not self.csv_path:
             self.csv_path = getattr(self.deck, "csv_path", None)
 
-        if not self.csv_path:
-            QMessageBox.warning(self, "No CSV Path", "No CSV file path set. Please set csv_path before saving.")
-            return False
-        
+        target_path = self.csv_path
+        if not target_path:
+            sanitized_name = "".join(ch if ch.isalnum() or ch in "-_. " else "_" for ch in self.deck.name).strip() or "Untitled"
+            target_path = str(Path.cwd() / f"{sanitized_name}.csv")
+
         try:
-            self.deck.export_to_csv(self.csv_path)
+            self.deck.export_to_csv(target_path)
+            self.csv_path = target_path
             self.has_unsaved_changes = False
-            QMessageBox.information(self, "Success", f"Changes saved to {self.csv_path}")
+            QMessageBox.information(self, "Success", f"Changes saved to {target_path}")
             return True
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save changes: {str(e)}")
             return False
 
     def _commit_current_card_edits(self):
-        """Apply the current edit fields to the active card before saving."""
+        """Apply the current editor contents to the active card before saving."""
         if len(self.deck) == 0:
             return
 
-        new_term = self.term_edit.text().strip()
-        new_def = self.def_edit.toPlainText().strip()
-
-        if not new_term or not new_def:
-            QMessageBox.warning(self, "Empty Fields", "Term and definition cannot be empty.")
-            return
-
-        self.deck.flashcards[self.current_index].term = new_term
-        self.deck.flashcards[self.current_index].definition = new_def
-        self.has_unsaved_changes = True
+        if self.card_editor.isVisible():
+            self._commit_card_edit()
 
 
 def main():
     """Example usage of the FlashcardViewer."""
-    from flashcard import FlashcardDeck
+    deck = FlashcardDeck("Untitled Deck")
     
-    # Create a sample deck
-    deck = FlashcardDeck("Python Basics")
-    deck.add_flashcard("Variable", "A container for storing data values")
-    deck.add_flashcard("Function", "A reusable block of code that performs a specific task")
-    deck.add_flashcard("List", "An ordered collection of items that can be modified")
-    deck.add_flashcard("Dictionary", "A collection of key-value pairs")
-    deck.add_flashcard("Loop", "A control structure that repeats code")
-    
-    # Create Qt application
     app = QApplication([])
-    
-    # Create and show the viewer
     viewer = FlashcardViewer(deck)
     viewer.show()
-    
-    # Run the application
     app.exec()
 
 
