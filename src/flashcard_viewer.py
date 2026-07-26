@@ -365,7 +365,7 @@ class FlashcardViewer(QMainWindow):
             if len(self.deck) > 0:
                 card = self.deck.get_flashcard(self.current_index)
                 self.term_edit.setText(card.term)
-                self.def_edit.setText(card.definition)
+                self.def_edit.setPlainText(card.definition)
             
             # Disable navigation buttons in edit mode
             self.prev_button.setEnabled(False)
@@ -426,9 +426,9 @@ class FlashcardViewer(QMainWindow):
     
     def _save_and_exit(self, dialog):
         """Save changes and exit edit mode."""
-        self._save_changes()
-        dialog.accept()
-        self._exit_edit_mode()
+        if self._save_changes():
+            dialog.accept()
+            self._exit_edit_mode()
     
     def _exit_without_saving(self, dialog):
         """Exit edit mode without saving."""
@@ -513,16 +513,40 @@ class FlashcardViewer(QMainWindow):
     
     def _save_changes(self):
         """Save changes to the CSV file."""
+        if len(self.deck) > 0 and self.edit_mode:
+            self._commit_current_card_edits()
+
+        if not self.csv_path:
+            self.csv_path = getattr(self.deck, "csv_path", None)
+
         if not self.csv_path:
             QMessageBox.warning(self, "No CSV Path", "No CSV file path set. Please set csv_path before saving.")
-            return
+            return False
         
         try:
             self.deck.export_to_csv(self.csv_path)
             self.has_unsaved_changes = False
             QMessageBox.information(self, "Success", f"Changes saved to {self.csv_path}")
+            return True
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save changes: {str(e)}")
+            return False
+
+    def _commit_current_card_edits(self):
+        """Apply the current edit fields to the active card before saving."""
+        if len(self.deck) == 0:
+            return
+
+        new_term = self.term_edit.text().strip()
+        new_def = self.def_edit.toPlainText().strip()
+
+        if not new_term or not new_def:
+            QMessageBox.warning(self, "Empty Fields", "Term and definition cannot be empty.")
+            return
+
+        self.deck.flashcards[self.current_index].term = new_term
+        self.deck.flashcards[self.current_index].definition = new_def
+        self.has_unsaved_changes = True
 
 
 def main():

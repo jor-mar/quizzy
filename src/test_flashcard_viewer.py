@@ -31,6 +31,7 @@ class FlashcardViewerTests(unittest.TestCase):
             viewer = FlashcardViewer(deck)
             self.assertEqual(viewer.csv_path, csv_path)
 
+            viewer._toggle_edit_mode()
             viewer.term_edit.setText("Updated term")
             viewer.def_edit.setPlainText("Updated definition")
             viewer._update_current_card()
