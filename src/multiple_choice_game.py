@@ -7,8 +7,8 @@ import random
 import time
 from typing import Dict, List, Tuple
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QGraphicsColorizeEffect
 )
 
 from flashcard import FlashcardDeck, Flashcard
@@ -147,12 +148,12 @@ class MultipleChoiceGame(QMainWindow):
 
     def _render_question(self, card: Flashcard, question_is_term: bool, options: List[str], correct_answer: str):
         if question_is_term:
-            prompt = f"What is the definition of: {card.term}?"
+            prompt = f"{card.term}"
         else:
-            prompt = f"Which term matches: {card.definition}?"
+            prompt = f"{card.definition}"
 
         self.question_label.setText(prompt)
-        self.progress_label.setText(f"Question {self.current_index + 1} of {self.total_questions}")
+        self.progress_label.setText(f"{self.current_index + 1}/{self.total_questions}")
 
         for widget in reversed(range(self.options_container.count())):
             item = self.options_container.takeAt(widget)
@@ -163,24 +164,51 @@ class MultipleChoiceGame(QMainWindow):
             button = QPushButton(option_text or "(blank)")
             button.setFont(QFont("Arial", 13))
             button.setMinimumHeight(50)
-            button.clicked.connect(lambda checked=False, text=option_text: self._handle_answer(text, correct_answer))
+            button.clicked.connect(lambda checked=False, text=option_text, btn=button: self._handle_answer(text, correct_answer, btn))
             self.options_container.addWidget(button)
 
-    def _handle_answer(self, selected_answer: str, correct_answer: str):
+    def _flash_button(self, button: QPushButton, color="#ff4040", duration=250):
+        effect = QGraphicsColorizeEffect(button)
+        effect.setColor(QColor(color))
+        effect.setStrength(0.0)
+        button.setGraphicsEffect(effect)
+
+        animation = QPropertyAnimation(effect, b"strength", self)
+        animation.setDuration(duration)
+        animation.setStartValue(0.0)
+        animation.setKeyValueAt(0.5, 1.0)
+        animation.setEndValue(0.0)
+        animation.setEasingCurve(QEasingCurve.InOutQuad)
+
+        # Keep the animation alive until it finishes.
+        self._flash_animation = animation
+
+        def cleanup():
+            button.setGraphicsEffect(None)
+
+        animation.finished.connect(cleanup)
+        animation.start()
+    
+    def _handle_answer(self, selected_answer: str, correct_answer: str, button: QPushButton):
         if self.current_question_id is None:
             return
 
+        response_time = time.time() - self.question_start_time if self.question_start_time else 0.0
+
+        result = self.card_results.setdefault(
+                        self.current_question_id,
+                        {"correct": 0, "attempts": 0, "response_times": []},
+                    )
+        
+        result["attempts"] += 1
+        result["response_times"].append(response_time)
+
         if selected_answer == correct_answer:
             self.correct_answers += 1
-
-        response_time = time.time() - self.question_start_time if self.question_start_time else 0.0
-        result = self.card_results.setdefault(
-            self.current_question_id,
-            {"correct": 0, "attempts": 0, "response_times": []},
-        )
-        result["correct"] = int(result["correct"]) + (1 if selected_answer == correct_answer else 0)
-        result["attempts"] = int(result["attempts"]) + 1
-        result["response_times"].append(response_time)
+            result["correct"] += 1
+        else:
+            self._flash_button(button)
+            return
 
         if self.current_index < len(self.question_order):
             self._show_next_question()
