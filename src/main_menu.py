@@ -381,6 +381,15 @@ class QuizzyMenu(QMainWindow):
         self.game_window.show()
 
 
+    def launch_matching(self):
+    
+            self.game_window = MatchingGame(
+                self.deck
+            )
+    
+            self.game_window.show()
+
+
 
     # -----------------------------
     # Analytics
