@@ -54,7 +54,7 @@ class AnalyticsWindow(QMainWindow):
     def _load_data(self):
 
         path = Path(
-            "performance.json"
+            "deck_stats.json"
         )
 
         if not path.exists():
