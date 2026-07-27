@@ -43,8 +43,8 @@ class DraggableLabel(QLabel):
         """)
         self.setAlignment(Qt.AlignCenter)
         self.setWordWrap(True)
-        self.setMinimumSize(200, 60)
-        self.setMaximumSize(250, 100)
+        self.setMinimumSize(260, 70)
+        self.setMaximumSize(320, 120)
     
     def mousePressEvent(self, event):
         """Start drag operation."""
@@ -80,8 +80,8 @@ class DropZone(QFrame):
         self.original_text = text
         
         self.setAcceptDrops(True)
-        self.setMinimumSize(200, 60)
-        self.setMaximumSize(250, 100)
+        self.setMinimumSize(260, 70)
+        self.setMaximumSize(320, 120)
         
         self.setStyleSheet("""
             QFrame {
@@ -268,6 +268,7 @@ class MatchingGame(QMainWindow):
         
         self.terms_widget = QWidget()
         self.terms_layout = QVBoxLayout(self.terms_widget)
+        self.terms_layout.setAlignment(Qt.AlignCenter)
         self.terms_layout.addStretch()
         self.terms_container.addWidget(self.terms_widget)
         
@@ -280,6 +281,7 @@ class MatchingGame(QMainWindow):
         
         self.defs_widget = QWidget()
         self.defs_layout = QVBoxLayout(self.defs_widget)
+        self.defs_layout.setAlignment(Qt.AlignCenter)
         self.defs_layout.addStretch()
         self.defs_container.addWidget(self.defs_widget)
         
@@ -638,6 +640,7 @@ class MatchingGame(QMainWindow):
         self.terms_container.addWidget(self.terms_label)
         self.terms_scroll = QWidget()
         self.terms_layout = QVBoxLayout(self.terms_scroll)
+        self.terms_layout.setAlignment(Qt.AlignCenter)
         self.terms_layout.addStretch()
         self.terms_container.addWidget(self.terms_scroll)
         
@@ -648,6 +651,7 @@ class MatchingGame(QMainWindow):
         self.defs_container.addWidget(self.defs_label)
         self.defs_scroll = QWidget()
         self.defs_layout = QVBoxLayout(self.defs_scroll)
+        self.defs_layout.setAlignment(Qt.AlignCenter)
         self.defs_layout.addStretch()
         self.defs_container.addWidget(self.defs_scroll)
         
