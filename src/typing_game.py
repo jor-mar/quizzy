@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from flashcard import FlashcardDeck, Flashcard
+from performance_tracker import PerformanceTracker
 
 
 class TypingGame(QMainWindow):
@@ -395,9 +396,26 @@ class TypingGame(QMainWindow):
 
         self._calculate_confidence_scores()
 
+        tracker = PerformanceTracker()
+        tracker.update_session(
+            self.deck.name,
+            self.original_deck.flashcards,
+            self.card_results,
+            self.confidence_scores
+        )
+
         self._show_results()
 
-
+    def _metric_color(self, value):
+    
+            if value >= 80:
+                return "#2e8b57"   # green
+    
+            elif value >= 50:
+                return "#d98c00"   # orange
+    
+            else:
+                return "#d9534f"   # red
 
     def _show_results(self):
 
@@ -466,7 +484,101 @@ class TypingGame(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
+        results = []
 
+        for index, card in enumerate(self.original_deck.flashcards):
+
+            result = self.card_results.get(
+                index,
+                {
+                    "correct": 0,
+                    "attempts": 0
+                }
+            )
+
+            attempts = int(result["attempts"])
+            correct = int(result["correct"])
+
+            skipped = result.get("skipped", False)
+
+            if skipped:
+                accuracy_value = -1          # Forces skipped cards to the top
+                accuracy_text = "Skipped"
+
+            elif attempts:
+                accuracy_value = int(correct / attempts * 100)
+                accuracy_text = f"{accuracy_value}%"
+
+            else:
+                accuracy_value = 101         # Put untouched cards after skipped
+                accuracy_text = "No attempts"
+
+            confidence = self.confidence_scores.get(
+                index,
+                0
+            )
+
+            results.append(
+                (
+                    skipped,
+                    accuracy_value,
+                    confidence,
+                    accuracy_text,
+                    card
+                )
+            )
+
+
+        # Skipped first, then lowest accuracy first
+        results.sort(
+            key=lambda x: (
+                not x[0],
+                x[1]
+            )
+        )
+
+
+        for skipped, accuracy_value, confidence, accuracy_text, card in results:
+
+            row = QWidget()
+            row_layout = QVBoxLayout(row)
+
+            top = QLabel(card.term)
+            top.setFont(QFont("Arial", 13, QFont.Bold))
+
+            bottom = QLabel()
+
+            if skipped:
+
+                bottom.setText(
+                    f"<span style='color:#777;'>Skipped</span> | "
+                    f"<span style='color:{self._metric_color(confidence)};'>"
+                    f"Confidence {confidence}/100</span>"
+                )
+
+            else:
+
+                bottom.setText(
+                    f"<span style='color:{self._metric_color(accuracy_value)};'>"
+                    f"Accuracy {accuracy_text}</span>"
+                    " | "
+                    f"<span style='color:{self._metric_color(confidence)};'>"
+                    f"Confidence {confidence}/100</span>"
+                )
+
+            row_layout.addWidget(top)
+            row_layout.addWidget(bottom)
+
+            row.setStyleSheet("""
+                QWidget {
+                    background-color: #f9f9f9;
+                    border-radius: 6px;
+                    padding: 4px;
+                }
+            """)
+
+            layout.addWidget(row)
+        """
         for index, card in enumerate(
             self.original_deck.flashcards
         ):
@@ -506,7 +618,7 @@ class TypingGame(QMainWindow):
 
 
             layout.addWidget(label)
-
+        """
 
 
         scroll.setWidget(widget)
@@ -523,9 +635,11 @@ class TypingGame(QMainWindow):
             self._restart_game
         )
 
+        restart.setDefault(True)
+        restart.setAutoDefault(True)
+        restart.setFocus()
+
         self.main_layout.addWidget(restart)
-
-
 
     def _restart_game(self):
 
