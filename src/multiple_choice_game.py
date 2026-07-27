@@ -7,19 +7,22 @@ import random
 import time
 from typing import Dict, List, Tuple
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
+    QGraphicsColorizeEffect
 )
 
 from flashcard import FlashcardDeck, Flashcard
+from performance_tracker import PerformanceTracker
 
 
 class MultipleChoiceGame(QMainWindow):
@@ -44,13 +47,25 @@ class MultipleChoiceGame(QMainWindow):
         self.total_questions = len(self.deck)
         self.card_results: Dict[int, Dict[str, object]] = {}
         self.confidence_scores: Dict[int, int] = {}
+        self.option_buttons = []
+        self.game_active = False
+        self.results_widget = None
 
         self.setWindowTitle(f"Multiple Choice Quiz - {deck.name}")
         self.setMinimumSize(900, 650)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+
         self.main_layout = QVBoxLayout(central_widget)
+
+        # Entire quiz page
+        self.game_widget = QWidget()
+        self.game_layout = QVBoxLayout(self.game_widget)
+        self.game_layout.setSpacing(20)
+        self.game_layout.setContentsMargins(40, 20, 40, 20)
+
+        self.main_layout.addWidget(self.game_widget)
         self.main_layout.setSpacing(20)
         self.main_layout.setContentsMargins(40, 20, 40, 20)
 
@@ -66,33 +81,34 @@ class MultipleChoiceGame(QMainWindow):
         self.header_label = QLabel("Multiple Choice Quiz")
         self.header_label.setAlignment(Qt.AlignCenter)
         self.header_label.setFont(QFont("Arial", 18, QFont.Bold))
-        self.main_layout.addWidget(self.header_label)
+        self.game_layout.addWidget(self.header_label)
 
         self.progress_label = QLabel("")
         self.progress_label.setAlignment(Qt.AlignCenter)
         self.progress_label.setFont(QFont("Arial", 12))
-        self.main_layout.addWidget(self.progress_label)
+        self.game_layout.addWidget(self.progress_label)
 
         self.question_label = QLabel("")
         self.question_label.setAlignment(Qt.AlignCenter)
         self.question_label.setWordWrap(True)
         self.question_label.setFont(QFont("Arial", 16))
-        self.main_layout.addWidget(self.question_label)
+        self.game_layout.addWidget(self.question_label)
 
         self.options_container = QVBoxLayout()
         self.options_container.setSpacing(10)
-        self.main_layout.addLayout(self.options_container)
+        self.game_layout.addLayout(self.options_container)
 
         self.timer_label = QLabel("Time: 0:00")
         self.timer_label.setAlignment(Qt.AlignCenter)
         self.timer_label.setFont(QFont("Arial", 14, QFont.Bold))
-        self.main_layout.addWidget(self.timer_label)
+        self.game_layout.addWidget(self.timer_label)
 
     def _start_game(self):
         if not self.deck:
             self._game_complete()
             return
 
+        self.game_active = True
         self.start_time = time.time()
         self._show_next_question()
         self._start_timer()
@@ -147,40 +163,89 @@ class MultipleChoiceGame(QMainWindow):
 
     def _render_question(self, card: Flashcard, question_is_term: bool, options: List[str], correct_answer: str):
         if question_is_term:
-            prompt = f"What is the definition of: {card.term}?"
+            prompt = f"{card.term}"
         else:
-            prompt = f"Which term matches: {card.definition}?"
+            prompt = f"{card.definition}"
 
         self.question_label.setText(prompt)
-        self.progress_label.setText(f"Question {self.current_index + 1} of {self.total_questions}")
+        self.progress_label.setText(f"{self.current_index + 1}/{self.total_questions}")
 
         for widget in reversed(range(self.options_container.count())):
             item = self.options_container.takeAt(widget)
             if item.widget():
                 item.widget().deleteLater()
 
+        self.option_buttons.clear()
+
         for option_text in options:
             button = QPushButton(option_text or "(blank)")
             button.setFont(QFont("Arial", 13))
             button.setMinimumHeight(50)
-            button.clicked.connect(lambda checked=False, text=option_text: self._handle_answer(text, correct_answer))
+            button.clicked.connect(lambda checked=False, text=option_text, btn=button: self._handle_answer(text, correct_answer, btn))
             self.options_container.addWidget(button)
+            self.option_buttons.append(button)
 
-    def _handle_answer(self, selected_answer: str, correct_answer: str):
+        if self.option_buttons:
+            self.option_buttons[0].setFocus()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+
+        if not self.game_active and key in (Qt.Key_Return, Qt.Key_Enter):
+            self._restart_game()
+            return
+
+        if Qt.Key_1 <= key <= Qt.Key_4:
+            index = key - Qt.Key_1
+
+            if index < len(self.option_buttons):
+                self.option_buttons[index].click()
+                return
+
+        super().keyPressEvent(event)
+
+    def _flash_button(self, button: QPushButton, color="#ff4040", duration=250):
+        effect = QGraphicsColorizeEffect(button)
+        effect.setColor(QColor(color))
+        effect.setStrength(0.0)
+        button.setGraphicsEffect(effect)
+
+        animation = QPropertyAnimation(effect, b"strength", self)
+        animation.setDuration(duration)
+        animation.setStartValue(0.0)
+        animation.setKeyValueAt(0.5, 1.0)
+        animation.setEndValue(0.0)
+        animation.setEasingCurve(QEasingCurve.InOutQuad)
+
+        # Keep the animation alive until it finishes.
+        self._flash_animation = animation
+
+        def cleanup():
+            button.setGraphicsEffect(None)
+
+        animation.finished.connect(cleanup)
+        animation.start()
+    
+    def _handle_answer(self, selected_answer: str, correct_answer: str, button: QPushButton):
         if self.current_question_id is None:
             return
 
+        response_time = time.time() - self.question_start_time if self.question_start_time else 0.0
+
+        result = self.card_results.setdefault(
+                        self.current_question_id,
+                        {"correct": 0, "attempts": 0, "response_times": []},
+                    )
+        
+        result["attempts"] += 1
+        result["response_times"].append(response_time)
+
         if selected_answer == correct_answer:
             self.correct_answers += 1
-
-        response_time = time.time() - self.question_start_time if self.question_start_time else 0.0
-        result = self.card_results.setdefault(
-            self.current_question_id,
-            {"correct": 0, "attempts": 0, "response_times": []},
-        )
-        result["correct"] = int(result["correct"]) + (1 if selected_answer == correct_answer else 0)
-        result["attempts"] = int(result["attempts"]) + 1
-        result["response_times"].append(response_time)
+            result["correct"] += 1
+        else:
+            self._flash_button(button)
+            return
 
         if self.current_index < len(self.question_order):
             self._show_next_question()
@@ -206,14 +271,36 @@ class MultipleChoiceGame(QMainWindow):
     def _game_complete(self):
         if hasattr(self, "timer"):
             self.timer.stop()
+        self.game_active = False
         self._calculate_confidence_scores()
+
+        tracker = PerformanceTracker()
+        tracker.update_session(
+            self.deck.name,
+            self.original_deck.flashcards,
+            self.card_results,
+            self.confidence_scores
+        )
+
         self._show_results()
 
+    def _metric_color(self, value):
+
+        if value >= 80:
+            return "#2e8b57"   # green
+
+        elif value >= 50:
+            return "#d98c00"   # orange
+
+        else:
+            return "#d9534f"   # red
+
     def _show_results(self):
-        for widget in reversed(range(self.main_layout.count())):
-            item = self.main_layout.takeAt(widget)
-            if item.widget():
-                item.widget().deleteLater()
+        self.game_active = False
+        self.option_buttons.clear()
+
+        self.main_layout.removeWidget(self.game_widget)
+        self.game_widget.hide()
 
         total_time = int(time.time() - self.start_time) if self.start_time else 0
         minutes, seconds = divmod(total_time, 60)
@@ -248,6 +335,80 @@ class MultipleChoiceGame(QMainWindow):
         scores_widget = QWidget()
         scores_layout = QVBoxLayout(scores_widget)
 
+
+        #
+        results = []
+
+        for card_index, card in enumerate(self.original_deck.flashcards):
+            result = self.card_results.get(
+                card_index,
+                {"correct": 0, "attempts": 0}
+            )
+
+            attempts = int(result["attempts"])
+            correct = int(result["correct"])
+
+            accuracy_value = (
+                int((correct / attempts) * 100)
+                if attempts
+                else 0
+            )
+
+            confidence = self.confidence_scores.get(
+                card_index,
+                0
+            )
+
+            results.append(
+                (
+                    accuracy_value,
+                    confidence,
+                    card_index,
+                    card
+                )
+            )
+
+
+        # Lowest accuracy first
+        results.sort(
+            key=lambda x: x[0]
+        )
+
+
+        for accuracy_value, confidence, card_index, card in results:
+
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+
+            term_label = QLabel(card.term)
+
+            accuracy_label = QLabel(
+                f"Accuracy {accuracy_value}%"
+            )
+
+            confidence_label = QLabel(
+                f"Confidence {confidence}/100"
+            )
+
+
+            accuracy_label.setStyleSheet(
+                f"color: {self._metric_color(accuracy_value)};"
+            )
+
+            confidence_label.setStyleSheet(
+                f"color: {self._metric_color(confidence)};"
+            )
+
+
+            row_layout.addWidget(term_label)
+            row_layout.addWidget(accuracy_label)
+            row_layout.addWidget(confidence_label)
+
+            scores_layout.addWidget(row)
+        #
+
+
+        """
         for card_index, card in enumerate(self.original_deck.flashcards):
             result = self.card_results.get(card_index, {"correct": 0, "attempts": 0})
             attempts = int(result["attempts"])
@@ -261,28 +422,46 @@ class MultipleChoiceGame(QMainWindow):
                 "color: #333; font-size: 14px; padding: 5px; background-color: #f9f9f9; border-radius: 4px;"
             )
             scores_layout.addWidget(score_label)
+        """
 
         scroll_area.setWidget(scores_widget)
         results_layout.addWidget(scroll_area)
 
-        play_again = QPushButton("Play Again")
-        play_again.setFont(QFont("Arial", 14))
-        play_again.clicked.connect(self._restart_game)
-        results_layout.addWidget(play_again)
+        restart = QPushButton("Play Again")
+        restart.setFont(QFont("Arial", 14))
+        restart.clicked.connect(self._restart_game)
+        restart.setDefault(True)
+        restart.setAutoDefault(True)
+        restart.setFocus()
+        results_layout.addWidget(restart)
 
-        self.main_layout.addWidget(results_widget)
+        self.results_widget = results_widget
+        self.main_layout.addWidget(self.results_widget)
+        self.centralWidget().setFocus()
 
     def _restart_game(self):
+        # Remove results screen
+        self.main_layout.removeWidget(self.results_widget)
+        self.results_widget.deleteLater()
+
+        # Restore quiz screen
+        self.main_layout.addWidget(self.game_widget)
+        self.game_widget.show()
+
         self.current_index = 0
         self.question_order = self._shuffle_indices(len(self.deck))
         self.current_card = None
         self.current_question_is_term = True
         self.current_question_id = None
+
         self.correct_answers = 0
         self.start_time = None
         self.question_start_time = None
+
         self.card_results = {}
         self.confidence_scores = {}
+        self.option_buttons.clear()
+
         self._start_game()
 
 

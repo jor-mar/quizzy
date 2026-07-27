@@ -11,7 +11,9 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                 QGraphicsDropShadowEffect, QScrollArea)
 from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QMimeData
 from PySide6.QtGui import QFont, QDrag, QPixmap, QPainter, QColor
+
 from flashcard import FlashcardDeck, Flashcard
+from performance_tracker import PerformanceTracker
 
 
 class DraggableLabel(QLabel):
@@ -43,8 +45,8 @@ class DraggableLabel(QLabel):
         """)
         self.setAlignment(Qt.AlignCenter)
         self.setWordWrap(True)
-        self.setMinimumSize(200, 60)
-        self.setMaximumSize(250, 100)
+        self.setMinimumSize(260, 70)
+        self.setMaximumSize(320, 120)
     
     def mousePressEvent(self, event):
         """Start drag operation."""
@@ -80,8 +82,8 @@ class DropZone(QFrame):
         self.original_text = text
         
         self.setAcceptDrops(True)
-        self.setMinimumSize(200, 60)
-        self.setMaximumSize(250, 100)
+        self.setMinimumSize(260, 70)
+        self.setMaximumSize(320, 120)
         
         self.setStyleSheet("""
             QFrame {
@@ -205,7 +207,7 @@ class MatchingGame(QMainWindow):
         self.total_start_time = None
         self.match_times = {}  # card_id -> time taken to match
         self.confidence_scores = {}  # card_id -> confidence score
-        self.accuracy_attempts = {}  # card_id -> (correct_attempts, total_attempts)
+        self.card_results = {}  # card_id -> (correct_attempts, total_attempts)
         self.drag_terms = True  # True = drag terms to defs, False = drag defs to terms
         self.draggable_widgets = {}  # card_id -> list of draggable widgets
         self.drop_zone_widgets = {}  # card_id -> list of drop zone widgets
@@ -268,6 +270,7 @@ class MatchingGame(QMainWindow):
         
         self.terms_widget = QWidget()
         self.terms_layout = QVBoxLayout(self.terms_widget)
+        self.terms_layout.setAlignment(Qt.AlignCenter)
         self.terms_layout.addStretch()
         self.terms_container.addWidget(self.terms_widget)
         
@@ -280,6 +283,7 @@ class MatchingGame(QMainWindow):
         
         self.defs_widget = QWidget()
         self.defs_layout = QVBoxLayout(self.defs_widget)
+        self.defs_layout.setAlignment(Qt.AlignCenter)
         self.defs_layout.addStretch()
         self.defs_container.addWidget(self.defs_widget)
         
@@ -416,17 +420,27 @@ class MatchingGame(QMainWindow):
         total = len(self.current_page_cards)
         self.progress_label.setText(f"Matched: {matched}/{total}")
     
-    def on_match_attempt(self, dragged_card_id: int, target_card_id: int, same_type: bool):
-        """Track match attempts for accuracy calculation."""
-        # Track attempts for the dragged card
-        if dragged_card_id not in self.accuracy_attempts:
-            self.accuracy_attempts[dragged_card_id] = [0, 0]  # [correct, total]
-        
-        self.accuracy_attempts[dragged_card_id][1] += 1  # Increment total attempts
-        
-        # If it's a correct match (same card_id, different type)
+    def on_match_attempt(
+        self,
+        dragged_card_id: int,
+        target_card_id: int,
+        same_type: bool
+    ):
+        """Track attempts for accuracy calculation."""
+
+        result = self.card_results.setdefault(
+            dragged_card_id,
+            {
+                "correct": 0,
+                "attempts": 0,
+                "response_times": []
+            }
+        )
+
+        result["attempts"] += 1
+
         if dragged_card_id == target_card_id and not same_type:
-            self.accuracy_attempts[dragged_card_id][0] += 1  # Increment correct attempts
+            result["correct"] += 1
     
     def on_match_made(self, card_id: int):
         """Handle a successful match."""
@@ -516,9 +530,27 @@ class MatchingGame(QMainWindow):
         
         # Calculate final confidence scores for any remaining cards
         self._calculate_confidence_scores()
+
+        tracker = PerformanceTracker()
+        tracker.update_session(
+            self.deck.name,
+            self.original_deck.flashcards,
+            self.card_results,
+            self.confidence_scores
+        )
         
         # Show results
         self._show_results()
+
+    def _metric_color(self, value):
+        if value >= 80:
+            return "#2e8b57"   # green
+
+        elif value >= 50:
+            return "#d98c00"   # orange
+
+        else:
+            return "#d9534f"   # red
     
     def _show_results(self):
         """Show the results screen."""
@@ -558,7 +590,80 @@ class MatchingGame(QMainWindow):
         scores_scroll_area.setMaximumHeight(300)
         scores_widget = QWidget()
         scores_layout = QVBoxLayout(scores_widget)
-        
+
+        #
+        results = []
+
+        for card_index, card in enumerate(self.original_deck.flashcards):
+            result = self.card_results.get(
+                card_index,
+                {"correct": 0, "attempts": 0}
+            )
+
+            attempts = int(result["attempts"])
+            correct = int(result["correct"])
+
+            accuracy_value = (
+                int((correct / attempts) * 100)
+                if attempts
+                else 0
+            )
+
+            confidence = self.confidence_scores.get(
+                card_index,
+                0
+            )
+
+            results.append(
+                (
+                    accuracy_value,
+                    confidence,
+                    card_index,
+                    card
+                )
+            )
+
+
+        # Lowest accuracy first
+        results.sort(
+            key=lambda x: x[0]
+        )
+
+
+        for accuracy_value, confidence, card_index, card in results:
+
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+
+            term_label = QLabel(card.term)
+
+            accuracy_label = QLabel(
+                f"Accuracy {accuracy_value}%"
+            )
+
+            confidence_label = QLabel(
+                f"Confidence {confidence}/100"
+            )
+
+
+            accuracy_label.setStyleSheet(
+                f"color: {self._metric_color(accuracy_value)};"
+            )
+
+            confidence_label.setStyleSheet(
+                f"color: {self._metric_color(confidence)};"
+            )
+
+
+            row_layout.addWidget(term_label)
+            row_layout.addWidget(accuracy_label)
+            row_layout.addWidget(confidence_label)
+
+            scores_layout.addWidget(row)
+        #
+
+
+        """
         for card_id in sorted(self.confidence_scores.keys()):
             card = self.original_deck.get_flashcard(card_id)
             confidence = self.confidence_scores[card_id]
@@ -589,16 +694,20 @@ class MatchingGame(QMainWindow):
             score_label = QLabel(f"{card.term}: Confidence {confidence}/100 | Accuracy {accuracy}%")
             score_label.setStyleSheet(f"color: #333; font-size: 14px; padding: 5px; background-color: #f9f9f9; border-radius: 4px;")
             scores_layout.addWidget(score_label)
+        """
         
         scores_scroll_area.setWidget(scores_widget)
         results_layout.addWidget(scores_scroll_area)
         
         # Play again button
         results_layout.addSpacing(20)
-        play_again = QPushButton("Play Again")
-        play_again.setFont(QFont("Arial", 14))
-        play_again.clicked.connect(self._restart_game)
-        results_layout.addWidget(play_again)
+        restart = QPushButton("Play Again")
+        restart.setFont(QFont("Arial", 14))
+        restart.clicked.connect(self._restart_game)
+        restart.setDefault(True)
+        restart.setAutoDefault(True)
+        restart.setFocus()
+        results_layout.addWidget(restart)
         
         # Replace game area with results
         self.main_layout.removeWidget(self.game_area)
@@ -638,6 +747,7 @@ class MatchingGame(QMainWindow):
         self.terms_container.addWidget(self.terms_label)
         self.terms_scroll = QWidget()
         self.terms_layout = QVBoxLayout(self.terms_scroll)
+        self.terms_layout.setAlignment(Qt.AlignCenter)
         self.terms_layout.addStretch()
         self.terms_container.addWidget(self.terms_scroll)
         
@@ -648,6 +758,7 @@ class MatchingGame(QMainWindow):
         self.defs_container.addWidget(self.defs_label)
         self.defs_scroll = QWidget()
         self.defs_layout = QVBoxLayout(self.defs_scroll)
+        self.defs_layout.setAlignment(Qt.AlignCenter)
         self.defs_layout.addStretch()
         self.defs_container.addWidget(self.defs_scroll)
         

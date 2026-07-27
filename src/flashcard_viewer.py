@@ -15,7 +15,9 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                 QMenuBar, QMenu, QFileDialog)
 from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QPoint
 from PySide6.QtGui import QFont, QKeySequence, QAction
+
 from flashcard import Flashcard, FlashcardDeck
+from performance_tracker import PerformanceTracker
 
 
 class FlashcardViewer(QMainWindow):
@@ -183,7 +185,7 @@ class FlashcardViewer(QMainWindow):
         # LEFT PANEL
         # -----------------------------
         left_panel = QWidget()
-        left_panel.setFixedWidth(250)
+        left_panel.setFixedWidth(180)
 
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -223,7 +225,7 @@ class FlashcardViewer(QMainWindow):
         # RIGHT PANEL
         # -----------------------------
         right_panel = QWidget()
-        right_panel.setFixedWidth(250)
+        right_panel.setFixedWidth(180)
 
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -254,7 +256,7 @@ class FlashcardViewer(QMainWindow):
         card_container.addStretch()
 
         card_container.addWidget(left_panel)
-        card_container.addWidget(center_panel, 1)
+        card_container.addWidget(center_panel)
         card_container.addWidget(right_panel)
 
         card_container.addStretch()
@@ -296,9 +298,13 @@ class FlashcardViewer(QMainWindow):
         self.edit_controls.setVisible(False)
         self.main_layout.addWidget(self.edit_controls)
 
-        self.make_flashcards_button = QPushButton("Make Flashcards from Image(s)")
-        self.make_flashcards_button.clicked.connect(self._make_flashcards_from_images)
+        self.make_flashcards_button = QPushButton("Make Flashcards from Media")
+        self.make_flashcards_button.clicked.connect(self._make_flashcards_from_media)
         self.edit_controls_layout.addWidget(self.make_flashcards_button)
+
+        self.extend_flashcards_button = QPushButton("Extend Deck with AI")
+        self.extend_flashcards_button.clicked.connect(self._extend_deck_with_ai)
+        self.edit_controls_layout.addWidget(self.extend_flashcards_button)
 
         self.save_button = QPushButton("Save Changes (Ctrl+S)")
         self.save_button.setFont(QFont("Arial", 12, QFont.Bold))
@@ -758,13 +764,192 @@ class FlashcardViewer(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Import Error", f"Failed to import CSV: {exc}")
 
-    def _make_flashcards_from_images(self):
+    def _extend_deck_with_ai(self):
+        """
+        Ask Ollama to extend the current flashcard deck.
+        Uses performance data to focus on weak areas.
+        """
+
+        if not self.edit_mode:
+            return
+
+        if len(self.deck) == 0:
+            QMessageBox.warning(
+                self,
+                "Empty Deck",
+                "There are no cards to extend."
+            )
+            return
+
+
+        # -----------------------------
+        # Build deck context
+        # -----------------------------
+
+        deck_text = "Current Flashcard Deck:\n\n"
+
+        for i, card in enumerate(self.deck.flashcards):
+            deck_text += (
+                f"{i+1}. Term: {card.term}\n"
+                f"Definition: {card.definition}\n\n"
+            )
+
+
+        # -----------------------------
+        # Load performance information
+        # -----------------------------
+
+        weak_cards = []
+
+        try:
+            tracker = PerformanceTracker()
+
+            performance = tracker.get_deck_performance(
+                self.deck.name
+            )
+
+            if performance:
+                for card_index, data in performance.items():
+
+                    confidence = data.get(
+                        "confidence",
+                        100
+                    )
+
+                    if confidence < 60:
+                        if card_index < len(self.deck.flashcards):
+                            card = self.deck.flashcards[card_index]
+
+                            weak_cards.append(
+                                (
+                                    card.term,
+                                    card.definition,
+                                    confidence
+                                )
+                            )
+
+        except Exception:
+            # Performance data is optional
+            pass
+
+
+        weakness_text = ""
+
+        if weak_cards:
+
+            weakness_text = (
+                "\nWeakest Cards:\n\n"
+            )
+
+            for term, definition, confidence in weak_cards:
+                weakness_text += (
+                    f"- {term}: {definition} "
+                    f"(confidence {confidence}/100)\n"
+                )
+
+        else:
+
+            weakness_text = (
+                "\nNo performance data available. "
+                "Create useful expansions based on the deck.\n"
+            )
+
+
+        # -----------------------------
+        # Ollama prompt
+        # -----------------------------
+
+        prompt = f"""
+        You are helping expand a flashcard study deck.
+
+        Given the current deck below, create additional flashcards.
+
+        Rules:
+        - Return ONLY CSV.
+        - Use exactly this header:
+        Term,Definition
+        - Do not use markdown.
+        - Do not explain anything.
+        - Create 5-50 new cards.
+        - Avoid duplicates.
+        - Focus on concepts that improve understanding.
+        - If weak cards are provided, make additional cards that reinforce those concepts.
+
+        {deck_text}
+
+        {weakness_text}
+
+        Return only CSV.
+        """
+
+
+        try:
+
+            completed = subprocess.run(
+                [
+                    "ollama",
+                    "run",
+                    "llama3.2",
+                    prompt
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+
+
+            if completed.returncode != 0:
+                raise RuntimeError(
+                    completed.stderr
+                )
+
+
+            generated_csv = self._extract_csv_from_ollama_output(
+                completed.stdout
+            )
+
+
+            if not generated_csv:
+                raise RuntimeError(
+                    "Ollama returned invalid CSV."
+                )
+
+
+            added = self._merge_generated_cards_from_csv(
+                generated_csv
+            )
+
+
+            QMessageBox.information(
+                self,
+                "AI Expansion Complete",
+                f"Added {added} new flashcards."
+            )
+
+
+        except FileNotFoundError:
+
+            QMessageBox.critical(
+                self,
+                "Ollama Missing",
+                "Install Ollama before using AI features."
+            )
+
+        except Exception as exc:
+
+            QMessageBox.critical(
+                self,
+                "AI Generation Error",
+                str(exc)
+            )
+    
+    def _make_flashcards_from_media(self):
         """Generate flashcards from selected images using an Ollama vision model."""
         image_paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Select Images",
+            "Select Media",
             "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)",
+            "Media",
         )
         if not image_paths:
             return

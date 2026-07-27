@@ -1,0 +1,96 @@
+{
+    "Python Basics": {
+        "Variable": {
+            "accuracy": 0.426179375039995,
+            "confidence": 0.7958995316541242,
+            "attempts": 54,
+            "skips": 0
+        },
+        "Function": {
+            "accuracy": 0.4716807227634435,
+            "confidence": 0.8664305040165842,
+            "attempts": 54,
+            "skips": 0
+        },
+        "List": {
+            "accuracy": 0.5052992974028928,
+            "confidence": 0.8352852862123612,
+            "attempts": 54,
+            "skips": 0
+        },
+        "Dictionary": {
+            "accuracy": 0.40154801160006226,
+            "confidence": 0.7997799145996654,
+            "attempts": 54,
+            "skips": 0
+        },
+        "Loop": {
+            "accuracy": 0.7657170710857126,
+            "confidence": 0.9399800415194115,
+            "attempts": 51,
+            "skips": 0
+        },
+        "String": {
+            "accuracy": 0.25,
+            "confidence": 0.2125,
+            "attempts": 1,
+            "skips": 0
+        },
+        "Integer": {
+            "accuracy": 0.25,
+            "confidence": 0.12,
+            "attempts": 1,
+            "skips": 0
+        },
+        "Float": {
+            "accuracy": 0.25,
+            "confidence": 0.235,
+            "attempts": 1,
+            "skips": 0
+        },
+        "Boolean": {
+            "accuracy": 0.25,
+            "confidence": 0.1725,
+            "attempts": 1,
+            "skips": 0
+        },
+        "Tuple": {
+            "accuracy": 0.25,
+            "confidence": 0.11,
+            "attempts": 1,
+            "skips": 0
+        },
+        "Set": {
+            "accuracy": 0.25,
+            "confidence": 0.1975,
+            "attempts": 1,
+            "skips": 0
+        },
+        "Class": {
+            "accuracy": 0.25,
+            "confidence": 0.245,
+            "attempts": 1,
+            "skips": 0
+        }
+    },
+    "Imported Deck": {
+        "a": {
+            "accuracy": 0.25,
+            "confidence": 0.25,
+            "attempts": 1,
+            "skips": 0
+        },
+        "b": {
+            "accuracy": 0.25,
+            "confidence": 0.1025,
+            "attempts": 1,
+            "skips": 0
+        },
+        "c": {
+            "accuracy": 0.25,
+            "confidence": 0.165,
+            "attempts": 1,
+            "skips": 0
+        }
+    }
+}
