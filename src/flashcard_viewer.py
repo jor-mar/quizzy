@@ -296,8 +296,8 @@ class FlashcardViewer(QMainWindow):
         self.edit_controls.setVisible(False)
         self.main_layout.addWidget(self.edit_controls)
 
-        self.make_flashcards_button = QPushButton("Make Flashcards from Image(s)")
-        self.make_flashcards_button.clicked.connect(self._make_flashcards_from_images)
+        self.make_flashcards_button = QPushButton("Make Flashcards from Media")
+        self.make_flashcards_button.clicked.connect(self._make_flashcards_from_media)
         self.edit_controls_layout.addWidget(self.make_flashcards_button)
 
         self.save_button = QPushButton("Save Changes (Ctrl+S)")
@@ -758,13 +758,13 @@ class FlashcardViewer(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Import Error", f"Failed to import CSV: {exc}")
 
-    def _make_flashcards_from_images(self):
+    def _make_flashcards_from_media(self):
         """Generate flashcards from selected images using an Ollama vision model."""
         image_paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Select Images",
+            "Select Media",
             "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)",
+            "Media",
         )
         if not image_paths:
             return
