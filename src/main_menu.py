@@ -159,7 +159,6 @@ class QuizzyMenu(QMainWindow):
         self._update_buttons()
 
 
-
     def _update_buttons(self):
 
         has_deck = (
@@ -167,23 +166,18 @@ class QuizzyMenu(QMainWindow):
             and len(self.deck) > 0
         )
 
-        self.study_button.setEnabled(
-            has_deck
-        )
+        # Study is always available
+        self.study_button.setEnabled(True)
 
-        self.analytics_button.setEnabled(
-            has_deck
-        )
+        # Analytics is always available
+        self.analytics_button.setEnabled(True)
 
 
         if has_deck:
-
             self.status_label.setText(
                 f"Loaded: {self.deck.name}"
             )
-
         else:
-
             self.status_label.setText(
                 "No deck loaded"
             )
@@ -248,10 +242,6 @@ class QuizzyMenu(QMainWindow):
 
     def open_study_menu(self):
 
-        if not self.deck:
-            return
-
-
         window = QMainWindow()
 
         window.setWindowTitle(
@@ -314,6 +304,11 @@ class QuizzyMenu(QMainWindow):
             self.launch_mcq
         )
 
+        mcq.setEnabled(
+            self.deck is not None
+            and len(self.deck) > 0
+        )
+
         layout.addWidget(
             mcq
         )
@@ -328,15 +323,29 @@ class QuizzyMenu(QMainWindow):
             self.launch_typing
         )
 
+        typing.setEnabled(
+            self.deck is not None
+            and len(self.deck) > 0
+        )
+
         layout.addWidget(
             typing
         )
 
 
-        matching = QPushButton("Matching")
+        matching = QPushButton(
+            "Matching"
+        )
+
         matching.clicked.connect(
             self.launch_matching
         )
+
+        matching.setEnabled(
+            self.deck is not None
+            and len(self.deck) > 0
+        )
+
         layout.addWidget(
             matching
         )
@@ -395,9 +404,17 @@ class QuizzyMenu(QMainWindow):
     # Analytics
     # -----------------------------
 
+
     def open_analytics(self):
-        self.analytics_window = AnalyticsWindow(
+
+        deck_name = (
             self.deck.name
+            if self.deck
+            else None
+        )
+
+        self.analytics_window = AnalyticsWindow(
+            deck_name
         )
 
         self.analytics_window.show()
