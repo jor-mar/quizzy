@@ -72,5 +72,25 @@
             "attempts": 1,
             "skips": 0
         }
+    },
+    "Imported Deck": {
+        "a": {
+            "accuracy": 0.25,
+            "confidence": 0.25,
+            "attempts": 1,
+            "skips": 0
+        },
+        "b": {
+            "accuracy": 0.25,
+            "confidence": 0.1025,
+            "attempts": 1,
+            "skips": 0
+        },
+        "c": {
+            "accuracy": 0.25,
+            "confidence": 0.165,
+            "attempts": 1,
+            "skips": 0
+        }
     }
 }
