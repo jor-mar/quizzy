@@ -1,2 +1,2 @@
-To install: download dist\quizzy.exe.
+To install: download dist/quizzy.exe.
 AI powered by Ollama
