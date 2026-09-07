@@ -7,8 +7,8 @@ import io
 import os
 import subprocess
 import tempfile
+import random
 from pathlib import Path
-
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                 QHBoxLayout, QLabel, QPushButton, QFrame, QGraphicsOpacityEffect,
                                 QLineEdit, QTextEdit, QMessageBox, QDialog, QScrollArea,
@@ -32,6 +32,11 @@ class FlashcardViewer(QMainWindow):
         self.has_unsaved_changes = False
         self.csv_path = getattr(deck, "csv_path", None)  # Path to CSV file for saving
         self.card_flip_states = {}  # Track flip state for each card by index
+        # Temporary viewing order (does not modify deck)
+        self.original_order = list(self.deck.flashcards)
+        self.display_order = list(self.deck.flashcards)
+        self.is_shuffled = False
+
         self._initialize_deck_if_needed()
         
         # Create main window
@@ -275,6 +280,15 @@ class FlashcardViewer(QMainWindow):
         self.prev_button.setMinimumWidth(120)
         self.prev_button.clicked.connect(self._previous_card)
         self.button_layout.addWidget(self.prev_button)
+
+        self.shuffle_button = QPushButton("Shuffle")
+        self.shuffle_button.setFont(QFont("Arial", 10))
+        self.shuffle_button.setMinimumWidth(120)
+        self.shuffle_button.clicked.connect(self._shuffle_cards)
+
+        self.button_layout.addWidget(
+            self.shuffle_button
+        )
         
         self.next_button = QPushButton("Next →")
         self.next_button.setFont(QFont("Arial", 10))
@@ -311,6 +325,37 @@ class FlashcardViewer(QMainWindow):
         self.save_button.clicked.connect(self._save_changes)
         self.edit_controls_layout.addWidget(self.save_button)
 
+
+
+    def _shuffle_cards(self):
+        """Shuffle cards only for viewing."""
+        if self.edit_mode:
+            return
+
+        random.shuffle(self.display_order)
+
+        self.current_index = 0
+        self.showing_definition = False
+        self.card_flip_states.clear()
+
+        self.is_shuffled = True
+
+        self._update_display()
+
+
+
+    def _restore_original_order(self):
+        """Restore the original deck order."""
+        self.display_order = list(self.original_order)
+
+        self.current_index = 0
+        self.showing_definition = False
+        self.card_flip_states.clear()
+
+        self.is_shuffled = False
+
+        self._update_display()
+
     def _deck_title_clicked(self, event):
         """Open the deck-title editor when the title is clicked in edit mode."""
         if self.edit_mode:
@@ -344,6 +389,9 @@ class FlashcardViewer(QMainWindow):
         self.edit_controls.setVisible(is_edit_mode)
         self.add_card_button.setVisible(is_edit_mode)
         self.remove_card_button.setVisible(is_edit_mode)
+
+        self.shuffle_button.setEnabled(not is_edit_mode)
+
         if not is_edit_mode:
             self.deck_title_editor.setVisible(False)
             self.deck_label.setVisible(True)
@@ -361,7 +409,10 @@ class FlashcardViewer(QMainWindow):
     def _initialize_deck_if_needed(self):
         """Start with a single blank card when no deck or CSV is present."""
         if len(self.deck) == 0 and not getattr(self.deck, "csv_path", None):
+            new_card = Flashcard("", "")
             self.deck.add_flashcard("", "")
+            self.original_order.append(new_card)
+            self.display_order.append(new_card)
             self.current_index = 0
             self.showing_definition = False
 
@@ -381,14 +432,14 @@ class FlashcardViewer(QMainWindow):
     
     def _update_display(self):
         """Update the display with current card information."""
-        if len(self.deck) == 0:
+        if len(self.display_order) == 0:
             self.card_text.setVisible(True)
             self.card_editor.setVisible(False)
             self.card_text.setText("No cards in deck")
             self.counter_label.setText("0 / 0")
             return
         
-        card = self.deck.get_flashcard(self.current_index)
+        card = self.display_order[self.current_index]
         self.card_text.setVisible(True)
         self.card_editor.setVisible(False)
         self._refresh_preview_cards()
@@ -404,12 +455,12 @@ class FlashcardViewer(QMainWindow):
             self.card_text.setStyleSheet("background-color: white;")
             self.hint_label.setStyleSheet("color: gray; background-color: white;")
         
-        self.counter_label.setText(f"Card {self.current_index + 1} / {len(self.deck)}")
+        self.counter_label.setText(f"Card {self.current_index + 1} / {len(self.display_order)}")
         self._refresh_preview_cards()
         
         # Update button states
         self.prev_button.setEnabled(self.current_index > 0)
-        self.next_button.setEnabled(self.current_index < len(self.deck) - 1)
+        self.next_button.setEnabled(self.current_index < len(self.display_order) - 1)
         
         # Ensure window has focus for key events
         self.setFocus()
@@ -454,14 +505,14 @@ class FlashcardViewer(QMainWindow):
     
     def _refresh_card_view(self):
         """Refresh the card face or editor based on the current mode."""
-        if len(self.deck) == 0:
+        if len(self.display_order) == 0:
             self.card_text.setVisible(True)
             self.card_editor.setVisible(False)
             self.card_text.setText("No cards in deck")
             self.counter_label.setText("0 / 0")
             return
 
-        card = self.deck.get_flashcard(self.current_index)
+        card = self.display_order[self.current_index]
         if self.card_editor.isVisible():
             current_value = card.definition if self.showing_definition else card.term
             self.card_editor.setText(current_value)
@@ -485,17 +536,17 @@ class FlashcardViewer(QMainWindow):
                 self.card_text.setStyleSheet("background-color: white;")
                 self.hint_label.setStyleSheet("color: gray; background-color: white;")
 
-        self.counter_label.setText(f"Card {self.current_index + 1} / {len(self.deck)}")
+        self.counter_label.setText(f"Card {self.current_index + 1} / {len(self.display_order)}")
         self._refresh_preview_cards()
         self.prev_button.setEnabled(self.current_index > 0)
-        self.next_button.setEnabled(self.current_index < len(self.deck) - 1)
+        self.next_button.setEnabled(self.current_index < len(self.display_order) - 1)
         self.setFocus()
     
     def _next_card(self):
         """Move to the next card."""
         if self.edit_mode and self.card_editor.isVisible():
             self._commit_card_edit()
-        if self.current_index < len(self.deck) - 1:
+        if self.current_index < len(self.display_order) - 1:
             self.current_index += 1
             self.showing_definition = self.card_flip_states.get(self.current_index, False)
             self._update_display()
@@ -528,9 +579,12 @@ class FlashcardViewer(QMainWindow):
     def _toggle_edit_mode(self):
         """Toggle between edit mode and view mode."""
         if not self.edit_mode:
+            # Undo shuffle before editing
+            if self.is_shuffled:
+                self._restore_original_order()
             self._pre_edit_snapshot = {
                 "deck_name": self.deck.name,
-                "flashcards": list(self.deck.flashcards),
+                "flashcards": list(self.original_order),
                 "current_index": self.current_index,
                 "showing_definition": self.showing_definition,
                 "csv_path": self.csv_path,
@@ -538,10 +592,8 @@ class FlashcardViewer(QMainWindow):
             self.edit_mode = True
             self.edit_mode_button.setText("Exit Edit Mode")
             self._set_edit_mode_ui(True)
-            if len(self.deck) > 0:
+            if len(self.display_order) > 0:
                 self._sync_card_display_with_current_card()
-            self.prev_button.setEnabled(False)
-            self.next_button.setEnabled(False)
         else:
             if self.has_unsaved_changes:
                 self._show_exit_confirmation()
@@ -607,11 +659,14 @@ class FlashcardViewer(QMainWindow):
 
         self.deck.name = self._pre_edit_snapshot["deck_name"]
         self.deck.flashcards = list(self._pre_edit_snapshot["flashcards"])
+        self.original_order = list(self._pre_edit_snapshot["flashcards"])
+        self.display_order = list(self._pre_edit_snapshot["flashcards"])
         self.current_index = self._pre_edit_snapshot["current_index"]
         self.showing_definition = self._pre_edit_snapshot["showing_definition"]
         self.csv_path = self._pre_edit_snapshot["csv_path"]
         self.deck.csv_path = self._pre_edit_snapshot["csv_path"]
         self.card_flip_states = {}
+        self.is_shuffled = False
         self.deck_label.setText(self.deck.name)
         self.setWindowTitle(f"Flashcard Viewer - {self.deck.name}")
         self.has_unsaved_changes = False
@@ -622,7 +677,7 @@ class FlashcardViewer(QMainWindow):
         right_index = self.current_index + 1
 
         if left_index >= 0:
-            left_card = self.deck.get_flashcard(left_index)
+            left_card = self.display_order[left_index]
             left_is_flipped = self.card_flip_states.get(left_index, False)
             if left_is_flipped:
                 self.preview_left_frame.setStyleSheet(
@@ -646,8 +701,8 @@ class FlashcardViewer(QMainWindow):
             """)
             # self.preview_left_frame.setVisible(False)
 
-        if right_index < len(self.deck):
-            right_card = self.deck.get_flashcard(right_index)
+        if right_index < len(self.display_order):
+            right_card = self.display_order[right_index]
             right_is_flipped = self.card_flip_states.get(right_index, False)
             if right_is_flipped:
                 self.preview_right_frame.setStyleSheet(
@@ -673,14 +728,14 @@ class FlashcardViewer(QMainWindow):
 
     def _sync_card_display_with_current_card(self):
         """Ensure the main card UI reflects the current card contents."""
-        if len(self.deck) == 0:
+        if len(self.display_order) == 0:
             self.card_text.setVisible(True)
             self.card_editor.setVisible(False)
             self.card_text.setText("No cards in deck")
             self.counter_label.setText("0 / 0")
             return
 
-        card = self.deck.get_flashcard(self.current_index)
+        card = self.display_order[self.current_index]
         self.showing_definition = self.card_flip_states.get(self.current_index, False)
         self.card_text.setVisible(True)
         self.card_editor.setVisible(False)
@@ -688,14 +743,14 @@ class FlashcardViewer(QMainWindow):
         self.card_frame.setStyleSheet("background-color: white;")
         self.card_text.setStyleSheet("background-color: white;")
         self.hint_label.setStyleSheet("color: gray; background-color: white;")
-        self.counter_label.setText(f"Card {self.current_index + 1} / {len(self.deck)}")
+        self.counter_label.setText(f"Card {self.current_index + 1} / {len(self.display_order)}")
 
     def _begin_card_edit(self):
         """Open the inline editor for the current card side."""
-        if len(self.deck) == 0 or not self.edit_mode:
+        if len(self.display_order) == 0 or not self.edit_mode:
             return
 
-        card = self.deck.get_flashcard(self.current_index)
+        card = self.display_order[self.current_index]
         self.card_editor.setText(card.definition if self.showing_definition else card.term)
         self.card_text.setVisible(False)
         self.card_editor.setVisible(True)
@@ -704,10 +759,10 @@ class FlashcardViewer(QMainWindow):
 
     def _commit_card_edit(self):
         """Commit the inline editor contents to the current card."""
-        if len(self.deck) == 0 or not self.edit_mode:
+        if len(self.display_order) == 0 or not self.edit_mode:
             return
 
-        card = self.deck.get_flashcard(self.current_index)
+        card = self.display_order[self.current_index]
         value = self.card_editor.text().strip()
         if self.showing_definition:
             card.definition = value
@@ -721,7 +776,7 @@ class FlashcardViewer(QMainWindow):
 
     def _edit_current_card_content(self, value=None):
         """Toggle inline editing for the current card or apply a provided value."""
-        if len(self.deck) == 0:
+        if len(self.display_order) == 0:
             return
 
         if not self.edit_mode:
@@ -749,14 +804,24 @@ class FlashcardViewer(QMainWindow):
         try:
             imported_deck = FlashcardDeck.from_csv(file_path, name=Path(file_path).stem)
             self.deck.flashcards = list(imported_deck.flashcards)
+
+            # Reset viewer order state
+            self.original_order = list(self.deck.flashcards)
+            self.display_order = list(self.deck.flashcards)
+            self.is_shuffled = False
+
             self.deck.name = imported_deck.name
             self.deck.csv_path = imported_deck.csv_path
             self.csv_path = imported_deck.csv_path
+
             self.current_index = 0
             self.showing_definition = False
             self.has_unsaved_changes = False
             if len(self.deck) == 0:
+                new_card = Flashcard("", "")
                 self.deck.add_flashcard("", "")
+                self.original_order.append(new_card)
+                self.display_order.append(new_card)
                 self.current_index = 0
             self.setWindowTitle(f"Flashcard Viewer - {self.deck.name}")
             self._update_display()
@@ -773,7 +838,7 @@ class FlashcardViewer(QMainWindow):
         if not self.edit_mode:
             return
 
-        if len(self.deck) == 0:
+        if len(self.display_order) == 0:
             QMessageBox.warning(
                 self,
                 "Empty Deck",
@@ -1001,12 +1066,15 @@ class FlashcardViewer(QMainWindow):
                 term = row[0].strip()
                 definition = ""
             if term or definition:
+                new_card = Flashcard(term, definition)
                 self.deck.add_flashcard(term, definition)
+                self.original_order.append(new_card)
+                self.display_order.append(new_card)
                 cards_added += 1
 
         if cards_added:
             self.has_unsaved_changes = True
-            self.current_index = max(0, min(self.current_index, len(self.deck) - 1))
+            self.current_index = max(0, min(self.current_index, len(self.display_order) - 1))
             self.showing_definition = False
             self._update_display()
 
@@ -1063,24 +1131,29 @@ class FlashcardViewer(QMainWindow):
 
     def _remove_current_card(self):
         """Remove the current card from the deck while in edit mode."""
-        if len(self.deck) == 0:
+        if len(self.display_order) == 0:
             QMessageBox.warning(self, "No Cards", "No cards in deck to remove.")
             return
 
+        card = self.display_order[self.current_index]
         reply = QMessageBox.question(
             self, "Confirm Delete",
-            f"Are you sure you want to remove this card?\n\nTerm: {self.deck.flashcards[self.current_index].term}",
+            f"Are you sure you want to remove this card?\n\nTerm: {card.term}",
             QMessageBox.Yes | QMessageBox.No
         )
 
         if reply == QMessageBox.Yes:
-            del self.deck.flashcards[self.current_index]
+            # Remove from deck.flashcards (actual deck)
+            self.deck.flashcards.remove(card)
+            # Update original_order and display_order
+            self.original_order.remove(card)
+            self.display_order.remove(card)
             self.has_unsaved_changes = True
 
-            if self.current_index >= len(self.deck):
-                self.current_index = max(0, len(self.deck) - 1)
+            if self.current_index >= len(self.display_order):
+                self.current_index = max(0, len(self.display_order) - 1)
 
-            if len(self.deck) == 0:
+            if len(self.display_order) == 0:
                 self.card_text.setText("No cards in deck")
                 self.counter_label.setText("0 / 0")
             else:
@@ -1090,11 +1163,18 @@ class FlashcardViewer(QMainWindow):
     
     def _add_new_card(self):
         """Add a blank card after the current card and switch to it."""
-        if len(self.deck) == 0:
+        new_card = Flashcard("", "")
+        if len(self.display_order) == 0:
             self.deck.add_flashcard("", "")
+            self.original_order.append(new_card)
+            self.display_order.append(new_card)
             self.current_index = 0
         else:
-            self.deck.flashcards.insert(self.current_index + 1, Flashcard("", ""))
+            # Add to deck.flashcards (actual deck)
+            self.deck.flashcards.insert(self.current_index + 1, new_card)
+            # Update original_order and display_order
+            self.original_order.insert(self.current_index + 1, new_card)
+            self.display_order.insert(self.current_index + 1, new_card)
             self.current_index += 1
 
         self.has_unsaved_changes = True
@@ -1130,7 +1210,7 @@ class FlashcardViewer(QMainWindow):
 
     def _commit_current_card_edits(self):
         """Apply the current editor contents to the active card before saving."""
-        if len(self.deck) == 0:
+        if len(self.display_order) == 0:
             return
 
         if self.card_editor.isVisible():
